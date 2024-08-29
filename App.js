@@ -1,7 +1,12 @@
+
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TextInput, Button, FlatList, TouchableOpacity, Text, Alert } from 'react-native';
-import MapView, { Marker, UrlTile, Polyline } from 'react-native-maps';
+import MapView, { Marker, UrlTile, Polyline, Geojson } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as FileSystem from 'expo-file-system';
+
 
 export default function App() {
   const [location, setLocation] = useState(null);
@@ -12,13 +17,15 @@ export default function App() {
   const [navigationMode, setNavigationMode] = useState(false);
   const [navigationInstructions, setNavigationInstructions] = useState([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [indoorMapData, setIndoorMapData] = useState(null); // Данные карты МГТУ
+  const [showIndoorMap, setShowIndoorMap] = useState(false);
   const mapRef = useRef(null);
 
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission to access location was denied');
+        Alert.alert('Доступ к геопозиции был запрещен');
         return;
       }
 
@@ -27,7 +34,33 @@ export default function App() {
     })();
   }, []);
 
-  // Function to search location using Nominatim
+   // Загрузка карты МГТУ из файла geojson
+   useEffect(() => {
+    const loadIndoorMap = async () => {
+      try {
+        const fileUri = '/assets/Cube1.geojson'; // Путь к файлу GeoJSON
+        const mapData = await FileSystem.readAsStringAsync(fileUri);
+        setIndoorMapData(JSON.parse(mapData)); // Парсим и сохраняем данные
+      } catch (error) {
+        console.error('Ошибка при загрузке карты МГТУ:', error);
+      }
+    };
+    loadIndoorMap();
+  }, []);
+
+  const handleRegionChange = (region) => {
+    const distanceToTarget = getDistanceFromLatLonInKm(region.latitude, region.longitude, 53.422031, 58.981336);
+
+    // Если расстояние меньше 0.5 км и уровень приближения достаточно высок (например, 18)
+    if (distanceToTarget < 0.5 && region.latitudeDelta < 0.005) {
+      setShowIndoorMap(true);
+    } else {
+      setShowIndoorMap(false);
+    }
+  };
+
+
+  // Поиск местоположения через Nominatim
   const handleSearch = async () => {
     try {
       const response = await fetch(
@@ -53,14 +86,14 @@ export default function App() {
           longitudeDelta: 0.01,
         }, 1000);
       } else {
-        Alert.alert('Object not found');
+        Alert.alert('Объект не найден');
       }
     } catch (error) {
-      Alert.alert('Error while searching');
+      Alert.alert('Ошибка при поиске');
     }
   };
 
-  // Function to fetch suggestions for autocomplete
+  // Получение подсказок для автозаполнения
   const fetchSuggestions = async (query) => {
     try {
       if (query.length > 2) {
@@ -73,11 +106,11 @@ export default function App() {
         setSuggestions([]);
       }
     } catch (error) {
-      console.log('Error fetching suggestions', error);
+      console.log('Ошибка при получении подсказок', error);
     }
   };
 
-  // Function to clear search input
+  // Очистка поля поиска и маршрута
   const handleClearSearch = () => {
     setSearchQuery('');
     setSuggestions([]);
@@ -88,7 +121,7 @@ export default function App() {
     setCurrentStepIndex(0);
   };
 
-  // Function to build the route using OSRM
+  // Построение маршрута через OSRM
   const handleBuildRoute = async () => {
     if (location && markerLocation) {
       try {
@@ -103,20 +136,19 @@ export default function App() {
           }));
           setRouteCoordinates(route);
           setNavigationInstructions(data.routes[0].legs[0].steps);
-          console.log(navigationInstructions[0].maneuver.modifier)
 
         } else {
-          Alert.alert('Route not found');
+          Alert.alert('Маршрут не найден');
         }
       } catch (error) {
-        Alert.alert('Error building route');
+        Alert.alert('Ошибка при построении маршрута');
       }
     } else {
-      Alert.alert('Location not found or destination not selected');
+      Alert.alert('Текущая геопозиция или цель не найдены');
     }
   };
 
-  // Function to start navigation mode
+  // Начало режима навигации
   const handleStartNavigation = () => {
     setNavigationMode(true);
     mapRef.current.fitToCoordinates(routeCoordinates, {
@@ -126,32 +158,39 @@ export default function App() {
     updateNavigationInstructions();
   };
 
-  // Function to dynamically update navigation instructions
+  // Обновление маршрута и подсказок во время движения
   const updateNavigationInstructions = () => {
     Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 1 },
       (newLocation) => {
         setLocation(newLocation.coords);
+
         const currentStep = navigationInstructions[currentStepIndex];
 
-        // Calculate distance to next turn
+        // Рассчитываем расстояние до следующего поворота
         const distanceToNextTurn = getDistanceFromLatLonInKm(
           newLocation.coords.latitude,
           newLocation.coords.longitude,
           currentStep.maneuver.location[1],
           currentStep.maneuver.location[0]
-        ) * 1000; // Convert to meters
+        ) * 1000; // Преобразуем в метры
 
+        // Если расстояние меньше 10 метров и мы еще не на последнем шаге, переключаемся на следующий шаг
         if (distanceToNextTurn < 10 && currentStepIndex < navigationInstructions.length - 1) {
-          setCurrentStepIndex(currentStepIndex + 1); // Move to the next instruction
+          setCurrentStepIndex(currentStepIndex + 1);
+        }
+
+        // Если пользователь сильно отклонился от маршрута, перестраиваем маршрут
+        if (distanceToNextTurn > 5) {
+          handleBuildRoute(); // Перестроение маршрута
         }
       }
     );
   };
 
-  // Function to calculate distance between two coordinates
+  // Рассчитываем расстояние между двумя точками
   const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Radius of the earth in km
+    const R = 6371; // Радиус земли в км
     const dLat = deg2rad(lat2 - lat1);
     const dLon = deg2rad(lon2 - lon1);
     const a =
@@ -159,19 +198,19 @@ export default function App() {
       Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance in km
+    return R * c; // Расстояние в км
   };
 
   const deg2rad = (deg) => deg * (Math.PI / 180);
 
-  // Function to stop navigation mode
+  // Остановка режима навигации
   const handleStopNavigation = () => {
     setNavigationMode(false);
     setNavigationInstructions([]);
     setCurrentStepIndex(0);
   };
 
-  // Function to select a suggestion from the list
+  // Выбор подсказки из списка
   const handleSelectSuggestion = (suggestion) => {
     setSearchQuery(suggestion.display_name);
     setSuggestions([]);
@@ -192,13 +231,14 @@ export default function App() {
         showsUserLocation={true}
         minZoomLevel={5}
         maxZoomLevel={19}
+        onRegionChangeComplete={handleRegionChange} // Обрабатываем изменение региона
       >
         <UrlTile
           urlTemplate="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           maximumZ={19}
         />
 
-        {/* Marker for searched location */}
+        {/* Маркер для найденного места */}
         {markerLocation && (
           <Marker
             coordinate={{
@@ -209,58 +249,69 @@ export default function App() {
           />
         )}
 
-        {/* Route polyline */}
+        {/* Линия маршрута */}
         {routeCoordinates.length > 0 && (
           <Polyline
             coordinates={routeCoordinates}
-            strokeColor="#ff0000" // Red color for the route
+            strokeColor="#ff0000" // Красный цвет для маршрута
             strokeWidth={5}
+          />
+        )}
+
+        {/* Внутренняя карта здания, если условие выполнено */}
+        {showIndoorMap && indoorMapData && (
+          <Geojson
+            geojson={indoorMapData}
+            strokeColor="blue"
+            fillColor="rgba(0,0,255,0.1)"
+            strokeWidth={2}
           />
         )}
       </MapView>
 
-      {/* Search input and buttons */}
+      {/*```javascript
+      {/* Поле поиска и кнопки */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Enter place name"
+          placeholder="Введите название места"
           value={searchQuery}
           onChangeText={text => {
             setSearchQuery(text);
-            fetchSuggestions(text); // Autocomplete
+            fetchSuggestions(text); // Автозаполнение
           }}
         />
-        <Button title="Search" onPress={handleSearch} />
-        <Button title="Clear" onPress={handleClearSearch} />
+        <Button title="Поиск" onPress={handleSearch} />
+        <Button title="Очистить" onPress={handleClearSearch} />
       </View>
 
-      {/* Build route and Start navigation buttons */}
+      {/* Кнопки построения маршрута и начала навигации */}
       {markerLocation && (
         <View style={styles.routeButtonContainer}>
-          <Button title="Build Route" onPress={handleBuildRoute} />
+          <Button title="Построить маршрут" onPress={handleBuildRoute} />
           {routeCoordinates.length > 0 && !navigationMode && (
-            <Button title="Start Navigation" onPress={handleStartNavigation} />
+            <Button title="Начать навигацию" onPress={handleStartNavigation} />
           )}
         </View>
       )}
 
-      {/* Stop navigation button */}
+      {/* Кнопка остановки навигации */}
       {navigationMode && (
         <View style={styles.stopButtonContainer}>
-          <Button title="Stop Navigation" onPress={handleStopNavigation} color="red" />
+          <Button title="Остановить навигацию" onPress={handleStopNavigation} color="red" />
         </View>
       )}
 
-      {/* Display navigation instructions */}
+      {/* Отображение навигационных инструкций */}
       {navigationMode && navigationInstructions.length > 0 && (
         <View style={styles.navigationInstructionsContainer}>
           <Text style={styles.navigationInstructions}>
-            {`Next turn: ${navigationInstructions[currentStepIndex].maneuver.modifier}`}
+            {`Следующий поворот: ${navigationInstructions[currentStepIndex].maneuver.modifier}`}
           </Text>
         </View>
       )}
 
-      {/* Suggestions list */}
+      {/* Список подсказок */}
       {suggestions.length > 0 && (
         <FlatList
           style={styles.suggestionsList}
