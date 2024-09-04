@@ -6,6 +6,7 @@ import { StyleSheet, View, TextInput, Button, FlatList, TouchableOpacity, Text, 
 import MapView, { Marker, UrlTile, Polyline, Geojson } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system';
+import {mapData} from './data'
 
 
 export default function App() {
@@ -39,8 +40,7 @@ export default function App() {
     const loadIndoorMap = async () => {
       try {
         const fileUri = '/assets/Cube1.geojson'; // Путь к файлу GeoJSON
-        const mapData = await FileSystem.readAsStringAsync(fileUri);
-        setIndoorMapData(JSON.parse(mapData)); // Парсим и сохраняем данные
+        setIndoorMapData(mapData); // Парсим и сохраняем данные
       } catch (error) {
         console.error('Ошибка при загрузке карты МГТУ:', error);
       }
