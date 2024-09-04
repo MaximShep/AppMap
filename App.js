@@ -217,6 +217,35 @@ export default function App() {
     handleSearch();
   };
 
+  const handleMapPress = async (event) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+  
+    // Пример запроса к Nominatim для получения информации о здании
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+      );
+      const data = await response.json();
+  
+      const buildingName = data.address.building || 'Здание не найдено';
+  
+      setMarkerLocation({
+        latitude,
+        longitude,
+        title: buildingName,  // Название здания
+      });
+  
+      mapRef.current.animateToRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }, 1000);
+    } catch (error) {
+      Alert.alert('Ошибка при получении информации о здании');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <MapView
@@ -232,6 +261,7 @@ export default function App() {
         minZoomLevel={5}
         maxZoomLevel={19}
         onRegionChangeComplete={handleRegionChange} // Обрабатываем изменение региона
+        onPress={handleMapPress} // Добавляем обработчик нажатия
       >
         <UrlTile
           urlTemplate="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
