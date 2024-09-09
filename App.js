@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TextInput, Button, FlatList, TouchableOpacity, Text, Alert } from 'react-native';
 import MapView, { Marker, UrlTile, Polyline, Geojson } from 'react-native-maps';
@@ -20,6 +17,7 @@ export default function App() {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [indoorMapData, setIndoorMapData] = useState(null); // Данные карты МГТУ
   const [showIndoorMap, setShowIndoorMap] = useState(false);
+  const [selectedFloor, setSelectedFloor] = useState(1);
   const mapRef = useRef(null);
 
   useEffect(() => {
@@ -92,6 +90,28 @@ export default function App() {
       Alert.alert('Ошибка при поиске');
     }
   };
+
+  // Фильтрация данных GeoJSON по этажу
+  const filterGeojsonByFloor = (geojsonData, floor) => {
+    if (!geojsonData || !geojsonData.features) return null;
+    return {
+      type: 'FeatureCollection',
+      features: geojsonData.features.filter(feature => {
+        return feature && feature.properties && feature.properties.level === floor.toString();
+      }),
+    };
+  };
+
+  // Загрузка данных GeoJSON при изменении этажа
+  useEffect(() => {
+    // Подгрузите данные вашего GeoJSON файла
+        setIndoorMapData(filterGeojsonByFloor(mapData, selectedFloor));    
+  }, [selectedFloor]);
+
+ // Функция для переключения этажей
+ const changeLevel = (level) => {
+  setSelectedFloor(level);
+};
 
   // Получение подсказок для автозаполнения
   const fetchSuggestions = async (query) => {
@@ -296,9 +316,17 @@ export default function App() {
             fillColor="rgba(0,0,255,0.1)"
             strokeWidth={2}
           />
+          
         )}
       </MapView>
-
+         {/* Кнопки для смены этажей */}
+      {showIndoorMap && indoorMapData && (
+      <View style={styles.floorSelector}>
+        <Button title="Этаж 1" onPress={() => changeLevel(1)} />
+        <Button title="Этаж 2" onPress={() => changeLevel(2)} />
+        <Button title="Этаж 3" onPress={() => changeLevel(3)} />
+      </View>
+      )}
       {/*```javascript
       {/* Поле поиска и кнопки */}
       <View style={styles.searchContainer}>
@@ -431,5 +459,12 @@ const styles = StyleSheet.create({
   navigationInstructions: {
     fontSize: 16,
     color: '#333',
+  },
+  floorSelector: {
+    position: 'absolute',
+    bottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
   },
 });
